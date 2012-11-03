@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Principal;
 using System.Text;
 
 using VastAbyss;
+using System.Diagnostics;
 
 namespace runasu {
     class Program {
@@ -12,7 +14,9 @@ namespace runasu {
 
             RunAs runAs = new RunAs();
 
+            runAs.UserName = "[Dektop]";
             runAs.CommandLine = "cmd.exe";
+            runAs.ApplicationName = "cmd.exe";
             runAs.Domain = System.Net.Dns.GetHostName();
             runAs.CreationFlagsInstance = RunAs.CreationFlags.NewProcessGroup;
 
@@ -48,10 +52,12 @@ namespace runasu {
                     } else if (CName == "command") {
                         runAs.CommandLine = CComm;
                     } else if (CName == "creationflag") {
-                        RunAs.CreationFlags flag;
-                        if (Enum.TryParse(CComm, true, out flag)) {
-                            runAs.CreationFlagsInstance = flag;
-                        } else {
+                        try
+                        {
+                            runAs.CreationFlagsInstance = (RunAs.CreationFlags)Enum.Parse(typeof(RunAs.CreationFlags), CComm);
+                        }
+                        catch (Exception ex)
+                        {
                             Console.WriteLine("Creation flag not found : " + CComm);
                             Console.WriteLine("Use one of this flags:");
                             foreach (string sflag in Enum.GetNames(typeof(RunAs.CreationFlags)))
@@ -59,10 +65,12 @@ namespace runasu {
                             return;
                         }
                     } else if (CName == "logonflag") {
-                        RunAs.LogonFlags flag;
-                        if (Enum.TryParse(CComm, true, out flag)) {
-                            runAs.LogonFlagsInstance = flag;
-                        } else {
+                        try
+                        {
+                            runAs.LogonFlagsInstance = (RunAs.LogonFlags)Enum.Parse(typeof(RunAs.LogonFlags), CComm);
+                        }
+                        catch (Exception ex)
+                        {
                             Console.WriteLine("Logon flag not found : " + CComm);
                             Console.WriteLine("Use one of this flags:");
                             foreach (string sflag in Enum.GetNames(typeof(RunAs.LogonFlags)))
@@ -70,7 +78,10 @@ namespace runasu {
                             return;
                         }
                     } else if (CName == "wait") {
-                        waitForProcess = bool.Parse(CComm);
+                        if (!bool.TryParse(CComm, out waitForProcess))
+                        {
+                            throw new Exception("invalid boolean value : \"" + CComm + "\" try \"true\" or \"false\"");
+                        }
                     } else {
                         Console.WriteLine(string.Format("Unknown Parameter : {0}\nUse /help", CName));
                         return;
@@ -83,10 +94,35 @@ namespace runasu {
             }
 
             try {
-                PrintOtions(runAs);
-                System.Diagnostics.Process process = runAs.StartProcess();
-                if (waitForProcess)
-                    process.WaitForExit();
+                PrintOptions(runAs);
+                if (runAs.UserName == "[Dektop]")
+                {
+                    if (Environment.UserInteractive)
+                    {
+                        //No Windows Service
+                        Process process = Process.Start(runAs.ApplicationName, runAs.CommandLine);
+                        if (waitForProcess)
+                            process.WaitForExit();
+                    }
+                    else
+                    {
+                        //Windows Service
+                        UserProcess.ProcessStarter ps = new UserProcess.ProcessStarter(runAs.ApplicationName,
+                                                                                       runAs.ApplicationName,
+                                                                                       runAs.CommandLine);
+                        ps.Run();
+                        if (waitForProcess)
+                            ps.WaitForExit();
+                    }
+                }
+                else
+                {
+                    Process process;
+                    process = runAs.StartProcess();
+                    if (waitForProcess)
+                        process.WaitForExit();
+                }
+
             } catch (Exception ex) {
                 Console.WriteLine(ex.Message);
             }
@@ -101,16 +137,62 @@ namespace runasu {
             return command.Substring(indexOf + 1, command.Length - indexOf - 1).Replace("\"", "");
         }
 
-        static void PrintOtions(RunAs r) {
-            Console.WriteLine(string.Format(@"
-TODO: PrintOptions
-            "));
+        static string MakePWStars(string charcount)
+        {
+            string buf = "";
+            for (int i = 0; i < charcount.Length; i++)
+                buf += "*";
+            return buf;
         }
+
+        static bool isAdmin()
+        {
+            WindowsIdentity identity = WindowsIdentity.GetCurrent();
+            WindowsPrincipal principal = new WindowsPrincipal(identity);
+            return principal.IsInRole(WindowsBuiltInRole.Administrator);
+        }
+
+        static void PrintOptions(RunAs r)
+        {
+            if (r.UserName == "[Desktop]")
+            {
+                Console.WriteLine(string.Format(@"
+Conditions:
+    Application : {0}
+    Command     : {1}
+",
+                                                r.ApplicationName,
+                                                r.CommandLine));
+                if (!Environment.UserInteractive)
+                    Console.WriteLine("try to get Interactive User-Token");
+            }
+            else
+            {
+                Console.WriteLine(string.Format(@"
+Conditions:
+    Username    : {0}
+    Password    : {1}
+    Domain      : {2}
+    Application : {3}
+    Command     : {4}
+    Directory   : {5}
+            ",
+                                                r.UserName,
+                                                MakePWStars(r.Password),
+                                                r.Domain,
+                                                r.ApplicationName,
+                                                r.CommandLine,
+                                                r.CurrentDirectory
+                                      ));
+            }
+        }
+
 
         static void PrintHelp() {
             Console.WriteLine(@"
-runasu version 1.0 [2012-11-02]
+runasu version 1.1 [2012-11-03]
 -------------------------------
+
 Usage: runasu.exe /user:<username> /pass:<password> /domain:<domain> /command:<execute command>
 
 All Parameter are optional!
@@ -119,7 +201,7 @@ Parameter:
     
     user:   Target Username
             
-            Default: Current Username
+            Default: [Desktop] -> If the current Process is not interactive with the Desktop (z.B. Windows Service), it will start it with the current interactive User-Token
 
 
     pass:   Password of Targetuser
@@ -134,7 +216,7 @@ Parameter:
 
     app:    File to execute
 
-            Default: This file
+            Default: cmd.exe
 
 
     command:Execution command

@@ -4,6 +4,6 @@
     <ProjectView>ProjectFiles</ProjectView>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x86'">
-    <StartArguments>/user:Administrator /pass:EA-Local-Admin! /wait:true</StartArguments>
+    <StartArguments>/user:Dude /pass:123456 /wait:true</StartArguments>
   </PropertyGroup>
 </Project>
